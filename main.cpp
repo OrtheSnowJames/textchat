@@ -1,8 +1,6 @@
 #include "color.h"
 #include "httplib.h"
 #include "json.hpp"
-#include <cstdlib>
-#include <iostream>
 #include <map>
 #include <mutex>
 #include <string>
