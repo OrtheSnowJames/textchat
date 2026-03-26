@@ -12,6 +12,8 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <deque>
+#include <vector>
 
 using nlohmann::json;
 
@@ -23,10 +25,18 @@ struct Client {
 
 std::map<int, Client> clients;
 std::mutex clients_mutex;
+std::deque<std::string> message_history;
+constexpr size_t MAX_HISTORY = 256;
 
 void broadcast(const std::string &msg) {
   for (auto [id, client] : clients) {
     clients[id].ws->send(msg);
+  }
+}
+void remember_message(const std::string &msg) {
+  message_history.push_back(msg);
+  if (message_history.size() > MAX_HISTORY) {
+    message_history.pop_front();
   }
 }
 
@@ -45,6 +55,7 @@ int main() {
       "/ws", [](const httplib::Request &req, httplib::ws::WebSocket &ws) {
         std::string msg;
         int c_id;
+        std::vector<std::string> history_snapshot;
         {
           std::lock_guard<std::mutex> l(clients_mutex);
 
@@ -59,6 +70,10 @@ int main() {
             }
           }
           clients[c_id] = (Client{&ws, "", randomColor()});
+          history_snapshot.assign(message_history.begin(), message_history.end());
+        }
+        for (const auto &old_msg : history_snapshot) {
+          ws.send(old_msg);
         }
         while (ws.read(msg)) {
           std::cout << msg << std::endl;
@@ -94,8 +109,12 @@ int main() {
           } else {
             json jmsg = {
                 {"event", "msg"}, {"id", std::to_string(c_id)}, {"msg", msg}};
-            std::lock_guard<std::mutex> l(clients_mutex);
-            broadcast(jmsg.dump());
+            std::string payload = jmsg.dump();
+            {
+              std::lock_guard<std::mutex> l(clients_mutex);
+              remember_message(payload);
+            }
+            broadcast(payload);
           }
         }
 
