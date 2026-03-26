@@ -17,8 +17,16 @@ socket.addEventListener("open", () => {
 });
 
 function addMessage(message, color) {
+  addMessageAt(message, color, Date.now());
+}
+
+function formatTimestamp(timestamp) {
+  return new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+}
+
+function addMessageAt(message, color, timestamp) {
   let txt = document.createElement("p");
-  let time = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  let time = formatTimestamp(timestamp);
   let timespan = document.createElement("span");
   timespan.innerHTML = `[${time}]&emsp;`; 
   timespan.style.cssText = "color: var(--border); font-size: 12px;";
@@ -56,13 +64,13 @@ socket.addEventListener("message", (event) => {
     }
     case "userjoin": {
       addUser(dj.id, {username: dj.username, color: dj.color});
-      addMessage(`<${users.get(dj.id).username}> joined.`, users.get(dj.id).color)
+      addMessageAt(`<${users.get(dj.id).username}> joined.`, users.get(dj.id).color, dj.timestamp ?? Date.now())
       return;
     }
     case "userleft": {
       document.getElementById("s-u-" + dj.id).remove();
       let txt = document.createElement("p");
-      addMessage(`<${users.get(dj.id).username}> left.`,users.get(dj.id).color)
+      addMessageAt(`<${users.get(dj.id).username}> left.`,users.get(dj.id).color, dj.timestamp ?? Date.now())
 
       users.delete(dj.id);
       return;
@@ -71,7 +79,7 @@ socket.addEventListener("message", (event) => {
       const user = users.get(dj.id);
       const messageUsername = dj.username ?? user?.username ?? "unknown";
       const messageColor = dj.color ?? user?.color ?? "white";
-      addMessage(`<${messageUsername}> ` + dj.msg, messageColor);
+      addMessageAt(`<${messageUsername}> ` + dj.msg, messageColor, dj.timestamp ?? Date.now());
       return;
     }
   }
