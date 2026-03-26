@@ -107,14 +107,17 @@ int main() {
             }
             }
           } else {
-            json jmsg = {
-                {"event", "msg"}, {"id", std::to_string(c_id)}, {"msg", msg}};
-            std::string payload = jmsg.dump();
             {
               std::lock_guard<std::mutex> l(clients_mutex);
+              json jmsg = {{"event", "msg"},
+                           {"id", std::to_string(c_id)},
+                           {"username", clients[c_id].username},
+                           {"color", clients[c_id].color},
+                           {"msg", msg}};
+              std::string payload = jmsg.dump();
               remember_message(payload);
+              broadcast(payload);
             }
-            broadcast(payload);
           }
         }
 
