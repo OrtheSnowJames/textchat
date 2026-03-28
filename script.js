@@ -20,9 +20,24 @@ input.focus();
 const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const wsHost = "chat.waffledogz.us";
 const socket = new WebSocket(`${wsProtocol}//${wsHost}/ws`);
+let movedToErrorPage = false;
 
-socket.addEventListener("error", (e) => alert("WS error: " + e));
-socket.addEventListener("close", (e) => alert("WS closed: " + e.code + " " + e.reason));
+function goToErrorPage(message) {
+  if (movedToErrorPage) return;
+  movedToErrorPage = true;
+  const msg = encodeURIComponent(message || "Connection to chat was lost.");
+  window.location.href = `/error.html?msg=${msg}`;
+}
+
+socket.addEventListener("error", () => {
+  goToErrorPage("Socket Error!");
+});
+
+socket.addEventListener("close", (e) => {
+  if (e.code === 1000 && e.wasClean) return;
+  const reason = e.reason ? ` (${e.reason})` : "";
+  goToErrorPage(`Connection closed (code ${e.code})${reason}.`);
+});
 
 socket.addEventListener("open", () => {
   socket.send("&u" + username);
