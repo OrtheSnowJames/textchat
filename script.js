@@ -18,6 +18,7 @@ let users_typing = Array();
 let typing = false;
 let typing_t = false;
 const typing_timer = 500;
+const outlinedChatTextStrokeWidth = "0.0001px";
 
 input.addEventListener('blur', () => input.focus());
 input.focus();
@@ -68,6 +69,12 @@ function shouldOutlineChatName(color) {
   return normalizedColor === "rgb(35,42,46)" || normalizedColor === "#232a2e";
 }
 
+function applyOutlinedChatTextStyles(element) {
+  element.style.webkitTextStroke = `${outlinedChatTextStrokeWidth} white`;
+  element.style.textStroke = `${outlinedChatTextStrokeWidth} white`;
+  element.style.textShadow = "-1px 0 white, 0 1px white, 1px 0 white, 0 -1px white";
+}
+
 function addMessageAt(message, color, timestamp) {
   let txt = document.createElement("p");
   let time = formatTimestamp(timestamp);
@@ -97,13 +104,14 @@ function addChatMessageAt(username, message, color, timestamp) {
   namespan.textContent = `<${username}> `;
   namespan.style.color = color;
   if (shouldOutlineChatName(color)) {
-    namespan.style.webkitTextStroke = "1px white";
-    namespan.style.textStroke = "1px white";
-    namespan.style.textShadow = "-1px 0 white, 0 1px white, 1px 0 white, 0 -1px white";
+    applyOutlinedChatTextStyles(namespan);
   }
 
   msgspan.textContent = message;
   msgspan.style.color = color;
+  if (shouldOutlineChatName(color)) {
+    applyOutlinedChatTextStyles(msgspan);
+  }
 
   txt.appendChild(timespan);
   txt.appendChild(namespan);
