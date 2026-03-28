@@ -119,6 +119,7 @@ socket.addEventListener("message", (event) => {
       let txt = document.createElement("p");
       addMessageAt(`<${users.get(dj.id).username}> left.`,users.get(dj.id).color, dj.timestamp ?? Date.now())
 
+      users_typing.splice(users_typing.indexOf(dj.id),1);
       users.delete(dj.id);
       return;
     }
