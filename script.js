@@ -1,5 +1,6 @@
 let username = localStorage.getItem("chat_name");
 let userColor = localStorage.getItem("chat_color");
+let notif_sound = new Audio('notif.mp3')
 
 if (username == null || username.length === 0) {
   window.location.href = `/name.html?v=${Date.now()}`;
@@ -27,21 +28,9 @@ const wsHost = "chat.waffledogz.us"; // Change this to your server's address and
 const socket = new WebSocket(`${wsProtocol}//${wsHost}/ws`);
 let movedToErrorPage = false;
 
-function goToErrorPage(message) {
-  if (movedToErrorPage) return;
-  movedToErrorPage = true;
-  const msg = encodeURIComponent(message || "Connection to chat was lost.");
-  window.location.href = `/error.html?msg=${msg}`;
-}
 
 socket.addEventListener("error", () => {
-  goToErrorPage("Socket Error!");
-});
-
-socket.addEventListener("close", (e) => {
-  if (e.code === 1000 && e.wasClean) return;
-  const reason = e.reason ? ` (${e.reason})` : "";
-  goToErrorPage(`Connection closed (code ${e.code})${reason}.`);
+  addMessage("an error occurred. check console for details", "red");
 });
 
 socket.addEventListener("open", () => {
@@ -55,6 +44,7 @@ socket.addEventListener("open", () => {
 });
 
 function addMessage(message, color) {
+  notif_sound.play();
   addMessageAt(message, color, Date.now());
 }
 
@@ -130,6 +120,7 @@ socket.addEventListener("message", (event) => {
       let txt = document.createElement("p");
       addMessageAt(`<${users.get(dj.id).username}> left.`,users.get(dj.id).color, dj.timestamp ?? Date.now())
 
+      users_typing.splice(users_typing.indexOf(dj.id),1);
       users.delete(dj.id);
       return;
     }
