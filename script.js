@@ -3,6 +3,10 @@ let username_ok = false;
 let msgBox = document.getElementById('msgs-box');
 let input = document.getElementById('msg-input');
 let users = new Map();
+let users_typing = Array();
+let typing = false;
+let typing_t = false;
+const typing_timer = 500;
 
 input.addEventListener('blur', () => input.focus());
 input.focus();
@@ -104,14 +108,60 @@ socket.addEventListener("message", (event) => {
       addMessageAt(`<${messageUsername}> ` + dj.msg, messageColor, dj.timestamp ?? Date.now());
       return;
     }
+    case "typing": {
+      users_typing.push(dj.id);
+      update_typing_span();
+      console.log(users_typing);
+      return;
+    }
+    case "stoptyping": {
+      users_typing.splice(users_typing.indexOf(dj.id), 1);
+      update_typing_span();
+      console.log(users_typing);
+      return;
+    }
   }
 });
 
+let typing_reset_timeout;
+
 function send(event) {
+  typing = true;
+  clearTimeout(typing_reset_timeout);
+  typing_reset_timeout = setTimeout(()=>{typing=false},typing_timer);
   if (event && event.keyCode != 13) return;
+  
   let input_txt = input.value;
   if (input_txt.trim() == "") return;
   socket.send(input_txt);
   input.value = "";
   input.focus();
 }
+
+function server_update_typing() {
+  if (typing != typing_t) {
+    if (typing) {
+      socket.send("&t");
+    }
+    else {
+      socket.send("&s");
+    }
+    typing_t = typing;
+  }
+}
+
+function update_typing_span() {
+  let spans = document.createElement("span");
+  spans.id = "us-typing";
+  spans.textContent = "Typing:"
+  users_typing.forEach((id) => {
+   let s = document.createElement("span");
+   s.textContent = `<${users.get(id).username}>`;
+   s.style.color = users.get(id).color; 
+   s.className = "u-typing-span"
+    spans.appendChild(s);
+  })
+  document.getElementById("us-typing").replaceWith(spans);
+}
+
+setInterval(server_update_typing, 30);
