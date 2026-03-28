@@ -1,8 +1,8 @@
 let username = localStorage.getItem("chat_name");
 
-if (username == null) {
-  username = prompt("Username: ");
-  localStorage.setItem("chat_name", username);
+if (username == null || username.length === 0) {
+  window.location.href = `/name.html?v=${Date.now()}`;
+  throw new Error("Missing username; redirecting to name page.");
 }
 
 let username_ok = false;
@@ -90,9 +90,9 @@ socket.addEventListener("message", (event) => {
 	username_ok = true;
       }
       else if (dj.result == "taken") {
-	alert("username taken :(");
-	username = prompt("Username: ");
-	socket.send("&u" + username);
+        alert("username taken :(");
+        localStorage.removeItem("chat_name");
+        window.location.href = `/name.html?v=${Date.now()}`;
       }
     }
     return;
