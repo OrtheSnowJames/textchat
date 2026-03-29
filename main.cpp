@@ -50,6 +50,31 @@ bool is_valid_hex_color(const std::string &value) {
   return true;
 }
 
+std::string base64_encode(const std::string &in) {
+  static const char table[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string out;
+  out.reserve(((in.size() + 2) / 3) * 4);
+
+  int val = 0;
+  int valb = -6;
+  for (unsigned char c : in) {
+    val = (val << 8) + c;
+    valb += 8;
+    while (valb >= 0) {
+      out.push_back(table[(val >> valb) & 0x3F]);
+      valb -= 6;
+    }
+  }
+  if (valb > -6) {
+    out.push_back(table[((val << 8) >> (valb + 8)) & 0x3F]);
+  }
+  while (out.size() % 4) {
+    out.push_back('=');
+  }
+  return out;
+}
+
 void broadcast(const std::string &msg) {
   for (auto [id, client] : clients) {
     clients[id].ws->send(msg);
@@ -78,6 +103,7 @@ int main() {
                           httplib::ws::WebSocket &ws) {
     std::string msg;
     int c_id;
+    bool expecting_photo_binary = false;
     std::vector<std::string> history_snapshot;
     {
       std::lock_guard<std::mutex> l(clients_mutex);
@@ -95,9 +121,42 @@ int main() {
       clients[c_id] = (Client{&ws, "", randomColor()});
     }
 
-    while (ws.read(msg)) {
+    while (true) {
+      auto read_result = ws.read(msg);
+      if (read_result == httplib::ws::Fail) {
+        break;
+      }
+
+      if (read_result == httplib::ws::Binary) {
+        if (!expecting_photo_binary) {
+          continue;
+        }
+        expecting_photo_binary = false;
+
+        if (msg.empty()) {
+          continue;
+        }
+
+        std::string image_base64 = base64_encode(msg);
+        std::string payload;
+        {
+          std::lock_guard<std::mutex> l(clients_mutex);
+          json jmsg = {{"event", "photo"},
+                       {"id", std::to_string(c_id)},
+                       {"username", clients[c_id].username},
+                       {"color", clients[c_id].color},
+                       {"timestamp", current_timestamp_ms()},
+                       {"mime", "image/jpeg"},
+                       {"data", image_base64}};
+          payload = jmsg.dump();
+          remember_message(payload);
+        }
+        broadcast(payload);
+        continue;
+      }
+
       std::cout << msg << std::endl;
-      if (msg[0] == '&') // command
+      if (!msg.empty() && msg[0] == '&') // command
       {
         switch (msg[1]) {
         case 'u': {
@@ -178,7 +237,11 @@ int main() {
           json jmsg = {{"event", "stoptyping"}, {"id", std::to_string(c_id)}};
           broadcast(jmsg.dump());
           break;
-        };
+        }
+        case 'p': { // photo marker; next binary frame contains image bytes
+          expecting_photo_binary = true;
+          break;
+        }
         }
       } else {
         std::string payload;
@@ -215,5 +278,7 @@ int main() {
 
   svr.set_mount_point("/", "./");
 
+  
+  std::cout << "Listening on " << "0.0.0.0:" << 8080 << std::endl;
   svr.listen("0.0.0.0", 8080);
 }

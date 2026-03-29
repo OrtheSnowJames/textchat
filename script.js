@@ -13,18 +13,81 @@ if (typeof userColor !== "string" || !/^#[0-9a-fA-F]{6}$/.test(userColor)) {
 let username_ok = false;
 let msgBox = document.getElementById('msgs-box');
 let input = document.getElementById('msg-input');
+let photoInput = document.getElementById('photo-input');
+let sendPhotoBtn = document.getElementById('send-photo-btn');
 let users = new Map();
 let users_typing = Array();
 let typing = false;
 let typing_t = false;
+let photoPickerActive = false;
 const typing_timer = 500;
 const outlinedChatTextStrokeWidth = "0.0001px";
+
+const imageMaxWidth = 1280;
+const imageMaxHeight = 1280;
+const imageQuality = 0.375;
+
+async function compressImage(file) {
+  let quality = imageQuality;
+  let maxWidth = imageMaxWidth;
+  let maxHeight = imageMaxHeight;
+
+  if (!(file instanceof Blob)) {
+    throw new Error("compressImage wants File/Blob input");
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = objectUrl;
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
+
+    const scale = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+    const width = Math.max(1, Math.round(img.width * scale));
+    const height = Math.max(1, Math.round(img.height * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("could not create ctx in compressImage");
+    }
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+
+    const outputType = "image/jpeg";
+    const compressedBlob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error("no blob produced"));
+            return;
+          }
+          resolve(blob);
+        },
+        outputType,
+        quality
+      );
+    });
+
+    return compressedBlob;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
 
 input.addEventListener('blur', () => input.focus());
 input.focus();
 
 const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-const wsHost = "chat.waffledogz.us"; // Change this to your server's address and port if needed
+const wsHost = "localhost:8080"; // Change this to your server's address and port if needed
 const socket = new WebSocket(`${wsProtocol}//${wsHost}/ws`);
 let movedToErrorPage = false;
 
@@ -121,6 +184,39 @@ function addChatMessageAt(username, message, color, timestamp) {
   msgBox.prepend(txt);
 }
 
+function addPhotoMessageAt(username, mime, base64Data, color, timestamp) {
+  let txt = document.createElement("p");
+  let time = formatTimestamp(timestamp);
+  let timespan = document.createElement("span");
+  let namespan = document.createElement("span");
+  let img = document.createElement("img");
+
+  timespan.innerHTML = `[${time}]&emsp;`;
+  timespan.style.cssText = "color: var(--border); font-size: 12px;";
+
+  namespan.textContent = `<${username}> `;
+  namespan.style.color = color;
+  if (shouldOutlineChatName(color)) {
+    applyOutlinedChatTextStyles(namespan);
+  }
+
+  img.src = `data:${mime};base64,${base64Data}`;
+  img.alt = `${username} photo`;
+  img.style.display = "block";
+  img.style.marginTop = "6px";
+  img.style.maxWidth = "260px";
+  img.style.width = "100%";
+  img.style.borderRadius = "8px";
+  img.style.border = "1px solid var(--border)";
+
+  txt.appendChild(timespan);
+  txt.appendChild(namespan);
+  txt.appendChild(document.createElement("br"));
+  txt.appendChild(img);
+  txt.className = "chat-msg";
+  msgBox.prepend(txt);
+}
+
 function addUser(id, user) {
 	users.set(id,{username: user.username, color: user.color});
 	let txt = document.createElement("p");
@@ -184,6 +280,21 @@ socket.addEventListener("message", (event) => {
       addChatMessageAt(messageUsername, dj.msg, messageColor, dj.timestamp ?? Date.now());
       return;
     }
+    case "photo": {
+      const user = users.get(dj.id);
+      const messageUsername = dj.username ?? user?.username ?? "unknown";
+      const messageColor = dj.color ?? user?.color ?? "white";
+      if (typeof dj.data === "string" && dj.data.length > 0) {
+        addPhotoMessageAt(
+          messageUsername,
+          dj.mime || "image/jpeg",
+          dj.data,
+          messageColor,
+          dj.timestamp ?? Date.now()
+        );
+      }
+      return;
+    }
     case "typing": {
       users_typing.push(dj.id);
       update_typing_span();
@@ -216,15 +327,51 @@ function send(event) {
   input.focus();
 }
 
+async function send_image(file) {
+  try {
+    const compressedBlob = await compressImage(file);
+    const imageBuffer = await compressedBlob.arrayBuffer();
+    socket.send("&p");
+    socket.send(imageBuffer);
+  } catch (err) {
+    console.error("failed to send image", err);
+    addMessage("failed to send image", "red");
+  }
+}
+
+if (sendPhotoBtn && photoInput) {
+  sendPhotoBtn.addEventListener("click", () => {
+    photoPickerActive = true;
+    photoInput.click();
+  });
+
+  photoInput.addEventListener("change", async () => {
+    photoPickerActive = false;
+    const file = photoInput.files && photoInput.files[0];
+    if (!file) return;
+    await send_image(file);
+    photoInput.value = "";
+  });
+
+  window.addEventListener("focus", () => {
+    if (!photoPickerActive) return;
+    // File picker is closed (including cancel); release typing state.
+    setTimeout(() => {
+      photoPickerActive = false;
+    }, 100);
+  });
+}
+
 function server_update_typing() {
-  if (typing != typing_t) {
-    if (typing) {
+  const isTypingNow = typing || photoPickerActive;
+  if (isTypingNow != typing_t) {
+    if (isTypingNow) {
       socket.send("&t");
     }
     else {
       socket.send("&s");
     }
-    typing_t = typing;
+    typing_t = isTypingNow;
   }
 }
 
