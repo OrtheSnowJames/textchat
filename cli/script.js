@@ -2,7 +2,7 @@ let username = localStorage.getItem("chat_name");
 let userColor = localStorage.getItem("chat_color");
 
 if (username == null || username.length === 0) {
-  window.location.href = `/name.html?v=${Date.now()}`;
+  window.location.href = `./name.html?v=${Date.now()}`;
   throw new Error("Missing username; redirecting to name page.");
 }
 
@@ -27,6 +27,8 @@ let photoPickerActive = false;
 const typing_timer = 500;
 const outlinedChatTextStrokeWidth = "0.0001px";
 let soundEnabled = true;
+let messages = Array();
+let lastRenderedMessageIndex = 0;
 
 const imageMaxWidth = 1280;
 const imageMaxHeight = 1280;
@@ -130,7 +132,7 @@ input.addEventListener('blur', () => input.focus());
 input.focus();
 
 const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-const wsHost = "chat.waffledogz.us";
+const wsHost = "localhost:8080";
 const wsUrl = `${wsProtocol}//${wsHost}/ws`;
 const socket = new WebSocket(wsUrl);
 let movedToErrorPage = false;
@@ -252,7 +254,7 @@ socket.addEventListener("open", () => {
     readyState: wsStateName(socket.readyState),
     hidden: document.visibilityState
   });
-  addMessageAt(`[system] wsHost: ${wsHost}`, "var(--aqua)", Date.now());
+  renderSys(`[system] wsHost: ${wsHost}`, "var(--aqua)", Date.now());
   safeSendWs(
     "&u" +
       JSON.stringify({
@@ -278,7 +280,7 @@ function playNotificationBeep() {
 
 function addMessage(message, color) {
   playNotificationBeep();
-  addMessageAt(message, color, Date.now());
+  renderSys(message, color, Date.now());
 }
 
 function formatTimestamp(timestamp) {
@@ -297,7 +299,7 @@ function applyOutlinedChatTextStyles(element) {
   element.style.textShadow = "-1px 0 white, 0 1px white, 1px 0 white, 0 -1px white";
 }
 
-function addMessageAt(message, color, timestamp) {
+function renderSys(message, color = "white", timestamp = Date.now()) {
   let txt = document.createElement("p");
   let time = formatTimestamp(timestamp);
   let timespan = document.createElement("span");
@@ -310,10 +312,22 @@ function addMessageAt(message, color, timestamp) {
   txt.appendChild(msgspan);
   txt.style.color = color;
   txt.className = "chat-msg";
+  txt.dataset.kind = "system";
   msgBox.prepend(txt);
 }
 
-function addChatMessageAt(username, message, color, timestamp) {
+function shouldGroup(senderId) {
+  const prev = msgBox.firstElementChild;
+  if (!prev) return false;
+  return prev.dataset.kind === "user" && prev.dataset.sender === senderId;
+}
+
+function stampUserMsg(node, senderId) {
+  node.dataset.kind = "user";
+  node.dataset.sender = senderId;
+}
+
+function renderText(username, message, color, timestamp, grouped, senderId) {
   let txt = document.createElement("p");
   let time = formatTimestamp(timestamp);
   let timespan = document.createElement("span");
@@ -330,20 +344,20 @@ function addChatMessageAt(username, message, color, timestamp) {
   }
 
   msgspan.textContent = message;
-  msgspan.style.color = color;
-  if (shouldOutlineChatName(color)) {
-    applyOutlinedChatTextStyles(msgspan);
-  }
+  msgspan.style.color = "white";
 
-  txt.appendChild(timespan);
-  txt.appendChild(namespan);
+  if (!grouped) {
+    txt.appendChild(timespan);
+    txt.appendChild(namespan);
+  }
   txt.appendChild(msgspan);
   txt.style.color = color;
-  txt.className = "chat-msg";
+  txt.className = grouped ? "chat-msg grouped-msg" : "chat-msg";
+  stampUserMsg(txt, senderId);
   msgBox.prepend(txt);
 }
 
-function addPhotoMessageAt(username, mime, base64Data, color, timestamp) {
+function renderImage(username, mime, base64Data, color, timestamp, grouped, senderId) {
   let txt = document.createElement("p");
   let time = formatTimestamp(timestamp);
   let timespan = document.createElement("span");
@@ -370,15 +384,18 @@ function addPhotoMessageAt(username, mime, base64Data, color, timestamp) {
   img.style.cursor = "pointer";
   img.className = "clickable";
 
-  txt.appendChild(timespan);
-  txt.appendChild(namespan);
+  if (!grouped) {
+    txt.appendChild(timespan);
+    txt.appendChild(namespan);
+  }
   txt.appendChild(document.createElement("br"));
   txt.appendChild(img);
-  txt.className = "chat-msg";
+  txt.className = grouped ? "chat-msg grouped-msg" : "chat-msg";
+  stampUserMsg(txt, senderId);
   msgBox.prepend(txt);
 }
 
-function addFileMessageAt(username, filename, content, language, color, timestamp) {
+function renderFile(username, filename, content, language, color, timestamp, grouped, senderId) {
   let txt = document.createElement("div");
   let header = document.createElement("div");
   let toggleBtn = document.createElement("button");
@@ -411,15 +428,18 @@ function addFileMessageAt(username, filename, content, language, color, timestam
   }
   pre.appendChild(code);
 
-  header.appendChild(timespan);
-  header.appendChild(namespan);
+  if (!grouped) {
+    header.appendChild(timespan);
+    header.appendChild(namespan);
+  }
   header.appendChild(filespan);
   header.appendChild(toggleBtn);
   header.className = "file-msg-header";
 
   txt.appendChild(header);
   txt.appendChild(pre);
-  txt.className = "chat-msg file-msg";
+  txt.className = grouped ? "chat-msg file-msg grouped-msg" : "chat-msg file-msg";
+  stampUserMsg(txt, senderId);
   msgBox.prepend(txt);
 
   toggleBtn.addEventListener("click", () => {
@@ -430,6 +450,100 @@ function addFileMessageAt(username, filename, content, language, color, timestam
   if (window.Prism) {
     Prism.highlightElement(code);
   }
+}
+
+function renderSingleMessage(message) {
+  if (!message || !message.user) return;
+  const u = message.user;
+  const v = message.value;
+  const t = message.timestamp;
+  if (message.contentType === "system") return renderSys(v.text || "", v.color || "white", t);
+  const senderId = u.id || u.username || "unknown";
+  const grouped = shouldGroup(senderId);
+
+  if (message.contentType === "text") return renderText(u.username, v, u.color, t, grouped, senderId);
+  if (message.contentType === "image") return renderImage(u.username, v.mime || "image/jpeg", v.base64Data || "", u.color, t, grouped, senderId);
+  if (message.contentType === "file") return renderFile(u.username, v.filename || "file.txt", v.content || "", v.language || "", u.color, t, grouped, senderId);
+}
+
+function renderMessages() {
+  if (lastRenderedMessageIndex >= messages.length) return;
+
+  for (let i = lastRenderedMessageIndex; i < messages.length; i += 1) {
+    renderSingleMessage(messages[i]);
+  }
+
+  lastRenderedMessageIndex = messages.length;
+}
+
+function queueIncomingMessage(message) {
+  if (!message) return;
+  messages.push(message);
+  renderMessages();
+}
+
+function resolveMessageUser(dj) {
+  const user = users.get(dj.id);
+  return {
+    id: String(dj.id ?? dj.username ?? ""),
+    username: dj.username ?? user?.username ?? "unknown",
+    color: dj.color ?? user?.color ?? "white"
+  };
+}
+
+function normalizeIncomingMessage(dj) {
+  if (!dj || typeof dj !== "object") return null;
+  const user = resolveMessageUser(dj);
+  const timestamp = dj.timestamp ?? Date.now();
+
+  if (dj.event === "msg") {
+    if (dj.msg === " joined." || dj.msg === " left.") {
+      return {
+        contentType: "system",
+        value: {
+          text: `<${user.username}>${dj.msg}`,
+          color: "#f2c94c"
+        },
+        user,
+        timestamp
+      };
+    }
+    return {
+      contentType: "text",
+      value: String(dj.msg ?? ""),
+      user,
+      timestamp
+    };
+  }
+
+  if (dj.event === "photo") {
+    if (typeof dj.data !== "string" || dj.data.length === 0) return null;
+    return {
+      contentType: "image",
+      value: {
+        mime: dj.mime || "image/jpeg",
+        base64Data: dj.data
+      },
+      user,
+      timestamp
+    };
+  }
+
+  if (dj.event === "file") {
+    if (typeof dj.content !== "string" || typeof dj.filename !== "string") return null;
+    return {
+      contentType: "file",
+      value: {
+        filename: dj.filename,
+        content: dj.content,
+        language: typeof dj.language === "string" ? dj.language : ""
+      },
+      user,
+      timestamp
+    };
+  }
+
+  return null;
 }
 
 function addUser(id, user) {
@@ -463,7 +577,7 @@ socket.addEventListener("message", (event) => {
       else if (dj.result == "taken") {
         alert("username taken :(");
         localStorage.removeItem("chat_name");
-        window.location.href = `/name.html?v=${Date.now()}`;
+        window.location.href = `./name.html?v=${Date.now()}`;
       }
     }
     return;
@@ -482,7 +596,7 @@ socket.addEventListener("message", (event) => {
     }
     case "userjoin": {
       addUser(dj.id, {username: dj.username, color: dj.color});
-      addMessageAt(`<${users.get(dj.id).username}> joined.`, users.get(dj.id).color, dj.timestamp ?? Date.now())
+      renderSys(`<${users.get(dj.id).username}> joined.`, "#f2c94c", dj.timestamp ?? Date.now())
       return;
     }
     case "userleft": {
@@ -492,48 +606,22 @@ socket.addEventListener("message", (event) => {
         userEl.remove();
       }
       if (user) {
-        addMessageAt(`<${user.username}> left.`, user.color, dj.timestamp ?? Date.now());
+        renderSys(`<${user.username}> left.`, "#f2c94c", dj.timestamp ?? Date.now());
       }
       users_typing = users_typing.filter((id) => id !== dj.id);
       users.delete(dj.id);
       return;
     }
     case "msg": {
-      const user = users.get(dj.id);
-      const messageUsername = dj.username ?? user?.username ?? "unknown";
-      const messageColor = dj.color ?? user?.color ?? "white";
-      addChatMessageAt(messageUsername, dj.msg, messageColor, dj.timestamp ?? Date.now());
+      queueIncomingMessage(normalizeIncomingMessage(dj));
       return;
     }
     case "photo": {
-      const user = users.get(dj.id);
-      const messageUsername = dj.username ?? user?.username ?? "unknown";
-      const messageColor = dj.color ?? user?.color ?? "white";
-      if (typeof dj.data === "string" && dj.data.length > 0) {
-        addPhotoMessageAt(
-          messageUsername,
-          dj.mime || "image/jpeg",
-          dj.data,
-          messageColor,
-          dj.timestamp ?? Date.now()
-        );
-      }
+      queueIncomingMessage(normalizeIncomingMessage(dj));
       return;
     }
     case "file": {
-      const user = users.get(dj.id);
-      const messageUsername = dj.username ?? user?.username ?? "unknown";
-      const messageColor = dj.color ?? user?.color ?? "white";
-      if (typeof dj.content === "string" && typeof dj.filename === "string") {
-        addFileMessageAt(
-          messageUsername,
-          dj.filename,
-          dj.content,
-          typeof dj.language === "string" ? dj.language : "",
-          messageColor,
-          dj.timestamp ?? Date.now()
-        );
-      }
+      queueIncomingMessage(normalizeIncomingMessage(dj));
       return;
     }
     case "typing": {
@@ -602,20 +690,26 @@ async function send_text_file(file) {
   }
 }
 
-if (sendPhotoBtn && photoInput) {
-  sendPhotoBtn.addEventListener("click", () => {
+function bindFilePicker(button, picker, onPick) {
+  if (!button || !picker) return;
+
+  button.addEventListener("click", () => {
     photoPickerActive = true;
-    photoInput.click();
+    picker.click();
   });
 
-  photoInput.addEventListener("change", async () => {
+  picker.addEventListener("change", async () => {
     photoPickerActive = false;
-    const file = photoInput.files && photoInput.files[0];
+    const file = picker.files && picker.files[0];
     if (!file) return;
-    await send_image(file);
-    photoInput.value = "";
+    await onPick(file);
+    picker.value = "";
   });
+}
 
+bindFilePicker(sendPhotoBtn, photoInput, send_image);
+
+if (sendPhotoBtn && photoInput) {
   window.addEventListener("focus", () => {
     if (!photoPickerActive) return;
     // File picker is closed (including cancel); release typing state.
@@ -625,20 +719,7 @@ if (sendPhotoBtn && photoInput) {
   });
 }
 
-if (sendFileBtn && fileInput) {
-  sendFileBtn.addEventListener("click", () => {
-    photoPickerActive = true;
-    fileInput.click();
-  });
-
-  fileInput.addEventListener("change", async () => {
-    photoPickerActive = false;
-    const file = fileInput.files && fileInput.files[0];
-    if (!file) return;
-    await send_text_file(file);
-    fileInput.value = "";
-  });
-}
+bindFilePicker(sendFileBtn, fileInput, send_text_file);
 
 if (msgBox && imageOverlay && overlayImg) {
   msgBox.addEventListener("click", (event) => {

@@ -101,6 +101,11 @@ body {
   margin: 4px 0;
 }
 
+.grouped-msg {
+  margin-left: 5rem;
+  margin-top: 1px;
+}
+
 .file-msg {
   padding: 6px 0;
 }
